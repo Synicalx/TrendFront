@@ -3,13 +3,20 @@ Basic reddit trend analysis from the front page
 
 ## Setup
 
-TBD
-
 Venv would be nice;
 ```bash
 python3 -m venv venv
 
 source venv/bin/activate
+```
+
+Setup ENV vars;
+
+```
+REDDIT_CLIENT_ID
+REDDIT_CLIENT_SECRET
+SUPABASE_URL
+SUPABASE_KEY
 ```
 
 ## Supabase setup

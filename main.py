@@ -5,12 +5,10 @@ import os
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
-# Reddit API credentials from environment variables
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 REDDIT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 
-# Supabase credentials from environment variables
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
@@ -22,7 +20,6 @@ reddit = praw.Reddit(
     user_agent=REDDIT_USER_AGENT
 )
 
-# Data Fetcher: Fetch top posts from Reddit's front page
 def fetch_data():
     print("Fetching data from Reddit...")
     for submission in reddit.front.hot(limit=10):
