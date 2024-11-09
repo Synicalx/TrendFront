@@ -34,12 +34,6 @@ reddit = praw.Reddit(
     user_agent=REDDIT_USER_AGENT
 )
 
-app = Flask(__name__)
-
-@app.route('/health')
-def health_check():
-    return {"status": "healthy"}, 200
-
 def process_submission(submission) -> dict:
     """
     Process a single submission
@@ -202,9 +196,22 @@ def run_scheduler():
             logging.error(f"Error in scheduler: {e}")
             time.sleep(60)  # Wait a minute before retrying
 
+
+app = Flask(__name__)
+
+@app.route('/health')
+def health_check():
+    return {"status": "healthy"}, 200
+
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
 if __name__ == "__main__":
-    run_flask()
+    # Start Flask in a separate thread
+    from threading import Thread
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True  # Dies when main thread dies
+    flask_thread.start()
+    
+    # Run scheduler in main thread
     run_scheduler()
