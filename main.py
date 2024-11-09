@@ -4,6 +4,7 @@ import math
 import os
 import time
 import schedule
+import logging
 from flask import Flask
 from datetime import datetime, timedelta, UTC
 from supabase import create_client, Client
@@ -20,6 +21,12 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - [%(funcName)s] - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 reddit = praw.Reddit(
     client_id=REDDIT_CLIENT_ID,
@@ -67,7 +74,7 @@ def fetch_data():
     """
     Fetch data from Reddit and batch insert into Supabase database.
     """
-    print("Fetching data from Reddit...")
+    logging.info("Fetching data from Reddit...")
     start_time = time.time()
     
     submissions = list(reddit.front.hot(limit=10))
@@ -81,7 +88,8 @@ def fetch_data():
     if posts_data:
         supabase.table("posts").upsert(posts_data).execute()
     
-    print(f"Processed {len(posts_data)} posts in {time.time() - start_time:.2f} seconds")
+    logging.info(f"Processed {len(posts_data)} posts in \
+                {time.time() - start_time:.2f} seconds")
 
 def retrieve_last_24h_posts():
     """
@@ -91,7 +99,7 @@ def retrieve_last_24h_posts():
         data: List of dictionaries containing post data
         current_time: Current time in UTC
     """
-    print("Retrieving DB data from the last 24 hours...")
+    logging.info("Retrieving DB data from the last 24 hours...")
 
     current_time = datetime.now(UTC)
     time_window = current_time - timedelta(hours=24)
@@ -103,7 +111,7 @@ def retrieve_last_24h_posts():
         .execute()
 
     if not response.data:
-        print("No data available for analysis.")
+        logging.warning("No data available for analysis.")
         return
     
     return response.data, current_time
@@ -116,7 +124,7 @@ def analyze_data(data, current_time):
         data: List of dictionaries containing post data
         current_time: Current time in UTC
     """
-    print("Analyzing data...")
+    logging.info("Analyzing data...")
 
     try:
         upvotes = [d["upvotes"] for d in data]
@@ -156,32 +164,32 @@ def analyze_data(data, current_time):
                 .eq("post_id", post_id) \
                 .execute()
         
-        print(f"Analysis complete. Processed {len(data)} posts.")
+        logging.info(f"Analysis complete. Processed {len(data)} posts.")
         
     except Exception as e:
-        print(f"Error during analysis: {str(e)}")
+        logging.error(f"Error during analysis: {str(e)}")
 
 def hourly_analysis():
-    print(f"Running hourly analysis at {datetime.now(UTC)}")
+    logging.info(f"Running hourly analysis at {datetime.now(UTC)}")
     try:
         data, current_time = retrieve_last_24h_posts()
         analyze_data(data, current_time)
     except Exception as e:
-        print(f"Error in hourly analysis: {e}")
+        logging.error(f"Error in hourly analysis: {e}")
 
 def ten_min_fetch():
-    print(f"Fetching data at {datetime.now(UTC)}")
+    logging.info(f"Fetching data at {datetime.now(UTC)}")
     try:
         fetch_data()
     except Exception as e:
-        print(f"Error in data fetch: {e}")
+        logging.error(f"Error in data fetch: {e}")
 
 def run_scheduler():
     # Schedule jobs
     schedule.every(10).minutes.do(ten_min_fetch)
     schedule.every().hour.at(":00").do(hourly_analysis)
     
-    print("Scheduler started...")
+    logging.info("Scheduler started...")
     
     # Run initial fetch
     ten_min_fetch()
@@ -191,7 +199,7 @@ def run_scheduler():
             schedule.run_pending()
             time.sleep(1)
         except Exception as e:
-            print(f"Error in scheduler: {e}")
+            logging.error(f"Error in scheduler: {e}")
             time.sleep(60)  # Wait a minute before retrying
 
 def run_flask():

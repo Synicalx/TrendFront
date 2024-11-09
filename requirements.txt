@@ -4,3 +4,4 @@ supabase
 schedule
 gunicorn
 flask
+logging
