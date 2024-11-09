@@ -2,4 +2,5 @@ praw
 numpy
 supabase
 schedule
+gunicorn
 flask
