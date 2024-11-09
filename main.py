@@ -4,6 +4,7 @@ import math
 import os
 import time
 import schedule
+from flask import Flask
 from datetime import datetime, timedelta, UTC
 from supabase import create_client, Client
 from concurrent.futures import ThreadPoolExecutor
@@ -25,6 +26,12 @@ reddit = praw.Reddit(
     client_secret=REDDIT_CLIENT_SECRET,
     user_agent=REDDIT_USER_AGENT
 )
+
+app = Flask(__name__)
+
+@app.route('/health')
+def health_check():
+    return {"status": "healthy"}, 200
 
 def process_submission(submission) -> dict:
     """
@@ -187,5 +194,9 @@ def run_scheduler():
             print(f"Error in scheduler: {e}")
             time.sleep(60)  # Wait a minute before retrying
 
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
+
 if __name__ == "__main__":
+    run_flask()
     run_scheduler()
