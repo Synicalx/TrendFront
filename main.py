@@ -2,7 +2,7 @@ import praw
 import numpy as np
 import math
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from supabase import create_client, Client
 
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
@@ -26,64 +26,86 @@ def fetch_data():
         if submission.is_self:
             continue  # Skip self-posts
         
+        if not submission.url:
+            continue # Skip posts without a URL
+
         post_data = {
             "post_id": submission.id,
             "title": submission.title,
-            "linked_page_title": submission.link_title if hasattr(submission, 'link_title') else '',
+            "linked_page_title": submission.url_title if hasattr(submission, 'url_title') else submission.title,
+            "linked_page_url": submission.url,
             "upvotes": submission.score,
             "comments_count": submission.num_comments,
-            "timestamp": datetime.utcfromtimestamp(submission.created_utc).isoformat(),
-            "fetch_time": datetime.utcnow().isoformat(),
+            "timestamp": datetime.fromtimestamp(submission.created_utc, UTC).isoformat(),
+            "fetch_time": datetime.now(UTC).isoformat(),
             "score": None 
         }
 
         # Insert or upsert data into Supabase
-        response = supabase.table("posts").upsert(post_data).execute()
-        if response.get("status_code") != 200:
-            print(f"Failed to upsert post: {submission.id}")
-        else:
-            print(f"Upserted post: {submission.id}")
+        supabase.table("posts").upsert(post_data).execute()
 
 def analyze_data():
     print("Analyzing data...")
-    current_time = datetime.utcnow()
-    time_window = current_time - timedelta(hours=24) 
-    
-    # Fetch posts from the last 24 hours
-    response = supabase.table("posts").select("post_id, upvotes, comments_count, timestamp").gte("fetch_time", time_window.isoformat()).execute()
-    data = response.get("data", [])
-    
-    if not data:
-        print("No data available for analysis.")
-        return
+    current_time = datetime.now(UTC)
+    time_window = current_time - timedelta(hours=24)
+    print("Time window:", time_window)
+    try:
+        # Fetch posts from the last 24 hours
+        response = supabase.table("posts") \
+            .select("post_id, upvotes, comments_count, timestamp") \
+            .gte("fetch_time", time_window.isoformat()) \
+            .execute()
+        
+        data = response.data
+        print("Data:", data)
+        if not data:
+            print("No data available for analysis.")
+            return
 
-    upvotes = [d["upvotes"] for d in data]
-    comments = [d["comments_count"] for d in data]
-    post_ages = [(current_time - datetime.fromisoformat(d["timestamp"])).total_seconds() / 60.0 for d in data]  # Age in minutes
-    
-    mean_upvotes = np.mean(upvotes)
-    std_dev_upvotes = np.std(upvotes)
+        upvotes = [d["upvotes"] for d in data]
+        comments = [d["comments_count"] for d in data]
 
-    # Normalization of current data (Min-Max)
-    u_min, u_max = min(upvotes), max(upvotes)
-    c_min, c_max = min(comments), max(comments)
-    
-    for post in data:
-        post_id = post["post_id"]
-        u_norm = (post["upvotes"] - u_min) / (u_max - u_min) if (u_max - u_min) > 0 else 0
-        c_norm = (post["comments_count"] - c_min) / (c_max - c_min) if (c_max - c_min) > 0 else 0
+        # Make sure to parse timestamp strings as timezone-aware datetimes
+        post_ages = []
+        for d in data:
+            timestamp = datetime.fromisoformat(d["timestamp"])
+            if timestamp.tzinfo is None:
+                # If timestamp has no timezone, assume UTC
+                timestamp = timestamp.replace(tzinfo=UTC)
+            age = (current_time - timestamp).total_seconds() / 3600.0
+            post_ages.append(age)
+
+        # Basic statistics
+        mean_upvotes = np.mean(upvotes)
+        std_dev_upvotes = np.std(upvotes)
         
-        age = (current_time - datetime.fromisoformat(post["timestamp"])).total_seconds() / 60.0
-        decay = math.exp(-0.01 * age)  # Decay constant k = 0.01
+        # Normalization of current data (Min-Max)
+        u_min, u_max = min(upvotes), max(upvotes)
+        c_min, c_max = min(comments), max(comments)
         
-        # Final scoring
-        w1, w2 = 0.7, 0.3  # Weights for upvotes and comments
-        score = (w1 * u_norm + w2 * c_norm) * decay
+        # Prevent division by zero
+        upvote_range = u_max - u_min if u_max != u_min else 1
+        comment_range = c_max - c_min if c_max != c_min else 1
         
-        response = supabase.table("posts").update({"score": score}).eq("post_id", post_id).execute()
-        if response.get("status_code") != 200:
-            print(f"Failed to update score for post ID: {post_id}")
-        print(f"Updated score for post ID: {post_id} - Score: {score}")
+        # Calculate normalized scores
+        for i, post_id in enumerate(d["post_id"] for d in data):
+            norm_upvotes = (upvotes[i] - u_min) / upvote_range
+            norm_comments = (comments[i] - c_min) / comment_range
+            age_factor = math.exp(-post_ages[i] / 24)  # Decay factor based on age
+            
+            # Combined score (weighted average of normalized metrics)
+            score = (0.7 * norm_upvotes + 0.3 * norm_comments) * age_factor
+            
+            # Update the score in the database
+            supabase.table("posts") \
+                .update({"score": float(score)}) \
+                .eq("post_id", post_id) \
+                .execute()
+        
+        print(f"Analysis complete. Processed {len(data)} posts.")
+        
+    except Exception as e:
+        print(f"Error during analysis: {str(e)}")
 
 if __name__ == "__main__":
     fetch_data()

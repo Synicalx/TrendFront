@@ -32,6 +32,7 @@ CREATE TABLE posts (
     post_id TEXT PRIMARY KEY,
     title TEXT,
     linked_page_title TEXT,
+    linked_page_url TEXT,
     upvotes INTEGER,
     comments_count INTEGER,
     timestamp TEXT,
