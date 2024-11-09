@@ -33,8 +33,10 @@ CREATE TABLE posts (
     title TEXT,
     linked_page_title TEXT,
     linked_page_url TEXT,
+    subreddit_name TEXT,
     upvotes INTEGER,
     comments_count INTEGER,
+    upvote_to_comment_ratio REAL,
     timestamp TEXT,
     fetch_time TEXT,
     score REAL

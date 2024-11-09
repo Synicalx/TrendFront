@@ -21,6 +21,9 @@ reddit = praw.Reddit(
 )
 
 def fetch_data():
+    """
+    Fetch data from Reddit and insert it into the Supabase database.
+    """
     print("Fetching data from Reddit...")
     for submission in reddit.front.hot(limit=10):
         if submission.is_self:
@@ -29,13 +32,19 @@ def fetch_data():
         if not submission.url:
             continue # Skip posts without a URL
 
+        # Ratio of votes to comments
+        ratio = submission.score / submission.num_comments \
+                if submission.num_comments > 0 else 0
+
         post_data = {
             "post_id": submission.id,
             "title": submission.title,
             "linked_page_title": submission.url_title if hasattr(submission, 'url_title') else submission.title,
             "linked_page_url": submission.url,
+            "subreddit_name": submission.subreddit.display_name,
             "upvotes": submission.score,
             "comments_count": submission.num_comments,
+            "upvote_to_comment_ratio": ratio,
             "timestamp": datetime.fromtimestamp(submission.created_utc, UTC).isoformat(),
             "fetch_time": datetime.now(UTC).isoformat(),
             "score": None 
@@ -44,24 +53,42 @@ def fetch_data():
         # Insert or upsert data into Supabase
         supabase.table("posts").upsert(post_data).execute()
 
-def analyze_data():
-    print("Analyzing data...")
+def retrieve_last_24h_posts():
+    """
+    Retrieve posts from the last 24 hours from the database NOT from reddit.
+
+    return: 
+        data: List of dictionaries containing post data
+        current_time: Current time in UTC
+    """
+    print("Retrieving DB data from the last 24 hours...")
+
     current_time = datetime.now(UTC)
     time_window = current_time - timedelta(hours=24)
-    print("Time window:", time_window)
-    try:
-        # Fetch posts from the last 24 hours
-        response = supabase.table("posts") \
-            .select("post_id, upvotes, comments_count, timestamp") \
-            .gte("fetch_time", time_window.isoformat()) \
-            .execute()
-        
-        data = response.data
-        print("Data:", data)
-        if not data:
-            print("No data available for analysis.")
-            return
 
+    # Fetch posts from the last 24 hours
+    response = supabase.table("posts") \
+        .select("post_id, upvotes, comments_count, timestamp") \
+        .gte("fetch_time", time_window.isoformat()) \
+        .execute()
+
+    if not response.data:
+        print("No data available for analysis.")
+        return
+    
+    return response.data, current_time
+
+def analyze_data(data, current_time):
+    """
+    Analyze the data we have in DB and update the scores in the DB.
+
+    args:
+        data: List of dictionaries containing post data
+        current_time: Current time in UTC
+    """
+    print("Analyzing data...")
+
+    try:
         upvotes = [d["upvotes"] for d in data]
         comments = [d["comments_count"] for d in data]
 
@@ -109,4 +136,5 @@ def analyze_data():
 
 if __name__ == "__main__":
     fetch_data()
-    analyze_data()
+    data, current_time = retrieve_last_24h_posts()
+    analyze_data(data, current_time)
