@@ -2,12 +2,17 @@ import praw
 import numpy as np
 import math
 import os
+import time
 from datetime import datetime, timedelta, UTC
 from supabase import create_client, Client
+from concurrent.futures import ThreadPoolExecutor
+from typing import List
 
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
-REDDIT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+REDDIT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+                    AppleWebKit/537.36 (KHTML, like Gecko) \
+                    Chrome/91.0.4472.124 Safari/537.36"
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -20,38 +25,55 @@ reddit = praw.Reddit(
     user_agent=REDDIT_USER_AGENT
 )
 
+def process_submission(submission) -> dict:
+    """
+    Process a single submission
+    
+    args:
+        submission: A Reddit submission object
+
+    return:
+        A dictionary containing post data
+    """
+    if submission.is_self or not submission.url:
+        return None
+        
+    ratio = submission.score / submission.num_comments \
+            if submission.num_comments > 0 else 0
+    
+    return {
+        "post_id": submission.id,
+        "title": submission.title,
+        "linked_page_title": submission.url_title if hasattr(submission, 'url_title') else submission.title,
+        "linked_page_url": submission.url,
+        "subreddit_name": submission.subreddit.display_name,
+        "upvotes": submission.score,
+        "comments_count": submission.num_comments,
+        "upvote_to_comment_ratio": ratio,
+        "timestamp": datetime.fromtimestamp(submission.created_utc, UTC).isoformat(),
+        "fetch_time": datetime.now(UTC).isoformat(),
+        "score": None
+    }
+
 def fetch_data():
     """
-    Fetch data from Reddit and insert it into the Supabase database.
+    Fetch data from Reddit and batch insert into Supabase database.
     """
     print("Fetching data from Reddit...")
-    for submission in reddit.front.hot(limit=10):
-        if submission.is_self:
-            continue  # Skip self-posts
-        
-        if not submission.url:
-            continue # Skip posts without a URL
-
-        # Ratio of votes to comments
-        ratio = submission.score / submission.num_comments \
-                if submission.num_comments > 0 else 0
-
-        post_data = {
-            "post_id": submission.id,
-            "title": submission.title,
-            "linked_page_title": submission.url_title if hasattr(submission, 'url_title') else submission.title,
-            "linked_page_url": submission.url,
-            "subreddit_name": submission.subreddit.display_name,
-            "upvotes": submission.score,
-            "comments_count": submission.num_comments,
-            "upvote_to_comment_ratio": ratio,
-            "timestamp": datetime.fromtimestamp(submission.created_utc, UTC).isoformat(),
-            "fetch_time": datetime.now(UTC).isoformat(),
-            "score": None 
-        }
-
-        # Insert or upsert data into Supabase
-        supabase.table("posts").upsert(post_data).execute()
+    start_time = time.time()
+    
+    submissions = list(reddit.front.hot(limit=10))
+    posts_data: List[dict] = []
+    
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = executor.map(process_submission, submissions)
+        posts_data = [r for r in results if r is not None]
+    
+    # Batch upsert to Supabase?
+    if posts_data:
+        supabase.table("posts").upsert(posts_data).execute()
+    
+    print(f"Processed {len(posts_data)} posts in {time.time() - start_time:.2f} seconds")
 
 def retrieve_last_24h_posts():
     """
@@ -92,12 +114,10 @@ def analyze_data(data, current_time):
         upvotes = [d["upvotes"] for d in data]
         comments = [d["comments_count"] for d in data]
 
-        # Make sure to parse timestamp strings as timezone-aware datetimes
         post_ages = []
         for d in data:
             timestamp = datetime.fromisoformat(d["timestamp"])
             if timestamp.tzinfo is None:
-                # If timestamp has no timezone, assume UTC
                 timestamp = timestamp.replace(tzinfo=UTC)
             age = (current_time - timestamp).total_seconds() / 3600.0
             post_ages.append(age)
@@ -123,7 +143,6 @@ def analyze_data(data, current_time):
             # Combined score (weighted average of normalized metrics)
             score = (0.7 * norm_upvotes + 0.3 * norm_comments) * age_factor
             
-            # Update the score in the database
             supabase.table("posts") \
                 .update({"score": float(score)}) \
                 .eq("post_id", post_id) \
