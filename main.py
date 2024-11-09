@@ -3,6 +3,7 @@ import numpy as np
 import math
 import os
 import time
+import schedule
 from datetime import datetime, timedelta, UTC
 from supabase import create_client, Client
 from concurrent.futures import ThreadPoolExecutor
@@ -153,7 +154,38 @@ def analyze_data(data, current_time):
     except Exception as e:
         print(f"Error during analysis: {str(e)}")
 
+def hourly_analysis():
+    print(f"Running hourly analysis at {datetime.now(UTC)}")
+    try:
+        data, current_time = retrieve_last_24h_posts()
+        analyze_data(data, current_time)
+    except Exception as e:
+        print(f"Error in hourly analysis: {e}")
+
+def ten_min_fetch():
+    print(f"Fetching data at {datetime.now(UTC)}")
+    try:
+        fetch_data()
+    except Exception as e:
+        print(f"Error in data fetch: {e}")
+
+def run_scheduler():
+    # Schedule jobs
+    schedule.every(10).minutes.do(ten_min_fetch)
+    schedule.every().hour.at(":00").do(hourly_analysis)
+    
+    print("Scheduler started...")
+    
+    # Run initial fetch
+    ten_min_fetch()
+    
+    while True:
+        try:
+            schedule.run_pending()
+            time.sleep(1)
+        except Exception as e:
+            print(f"Error in scheduler: {e}")
+            time.sleep(60)  # Wait a minute before retrying
+
 if __name__ == "__main__":
-    fetch_data()
-    data, current_time = retrieve_last_24h_posts()
-    analyze_data(data, current_time)
+    run_scheduler()
